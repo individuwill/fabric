@@ -109,7 +109,7 @@ def main():
             print("No patterns found")
             sys.exit()
     if args.listmodels:
-        gptmodels, localmodels, claudemodels = standalone.fetch_available_models()
+        gptmodels, localmodels, claudemodels, azuremodels = standalone.fetch_available_models()
         print("GPT Models:")
         for model in gptmodels:
             print(model)
@@ -118,6 +118,9 @@ def main():
             print(model)
         print("\nClaude Models:")
         for model in claudemodels:
+            print(model)
+        print("\nAzure Models:")
+        for model in azuremodels:
             print(model)
         sys.exit()
     if args.text is not None:

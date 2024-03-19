@@ -51,9 +51,10 @@ class Standalone:
         if not self.model:
             self.model = 'gpt-4-turbo-preview'
         self.claude = False
-        sorted_gpt_models, ollamaList, claudeList = self.fetch_available_models()
+        sorted_gpt_models, ollamaList, claudeList, azureList = self.fetch_available_models()
         self.local = self.model in ollamaList
         self.claude = self.model in claudeList
+        self.azure = self.model in azureList
 
     async def localChat(self, messages, host=''):
         from ollama import AsyncClient
@@ -108,6 +109,59 @@ class Standalone:
         if copy:
             pyperclip.copy(message.content[0].text)
 
+    async def azureStream(self, messages):
+        from openai import AzureOpenAI
+        azure_openai_api_key = os.environ['AZURE_OPENAI_API_KEY']
+        azure_openai_model_name = self.model # os.environ['AZURE_OPENAI_MODEL_DEPLOYMENT_NAME']
+        azure_openai_resource_name = os.environ['AZURE_OPENAI_RESOURCE_NAME']
+        azure_openai_api_version = os.environ.get('AZURE_OPENAI_API_VERSION', '2024-02-01')
+        azure_endpoint = f'https://{azure_openai_resource_name}.openai.azure.com/openai/deployments/{azure_openai_model_name}/chat/completions?api-version={azure_openai_api_version}'
+        azureClient = AzureOpenAI(api_key=azure_openai_api_key, azure_endpoint=azure_endpoint, api_version=azure_openai_api_version)
+        stream = azureClient.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.0,
+            top_p=1,
+            frequency_penalty=0.1,
+            presence_penalty=0.1,
+            stream=True
+        )
+        buffer = ""
+        for chunk in stream:
+            if len(chunk.choices) > 0 and chunk.choices[0].delta.content is not None:
+                char = chunk.choices[0].delta.content
+                buffer += char
+                if char not in ["\n", " "]:
+                    print(char, end="")
+                elif char == " ":
+                    print(" ", end="")  # Explicitly handle spaces
+                elif char == "\n":
+                    print()  # Handle newlines
+            sys.stdout.flush()
+
+    async def azureChat(self, messages):
+        from openai import AzureOpenAI
+        azure_openai_api_key = os.environ['AZURE_OPENAI_API_KEY']
+        azure_openai_model_name = self.model # os.environ['AZURE_OPENAI_MODEL_DEPLOYMENT_NAME']
+        azure_openai_resource_name = os.environ['AZURE_OPENAI_RESOURCE_NAME']
+        azure_openai_api_version = os.environ.get('AZURE_OPENAI_API_VERSION', '2024-02-01')
+        azure_endpoint = f'https://{azure_openai_resource_name}.openai.azure.com/openai/deployments/{azure_openai_model_name}/chat/completions?api-version={azure_openai_api_version}'
+        azureClient = AzureOpenAI(api_key=azure_openai_api_key, azure_endpoint=azure_endpoint, api_version=azure_openai_api_version)
+        response = azureClient.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.0,
+            top_p=1,
+            frequency_penalty=0.1,
+            presence_penalty=0.1,
+        )
+        print(response.choices[0].message.content)
+        if self.args.copy:
+            pyperclip.copy(response.choices[0].message.content)
+        if self.args.output:
+            with open(self.args.output, "w") as f:
+                f.write(response.choices[0].message.content)
+
     def streamMessage(self, input_data: str, context="", host=''):
         """        Stream a message and handle exceptions.
 
@@ -155,6 +209,8 @@ class Standalone:
             elif self.claude:
                 from anthropic import AsyncAnthropic
                 asyncio.run(self.claudeStream(system, user_message))
+            elif self.azure:
+                asyncio.run(self.azureStream(messages))
             else:
                 stream = self.client.chat.completions.create(
                     model=self.model,
@@ -240,6 +296,8 @@ class Standalone:
                     asyncio.run(self.localChat(messages))
             elif self.claude:
                 asyncio.run(self.claudeChat(system, user_message))
+            elif self.azure:
+                asyncio.run(self.azureChat(messages))
             else:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -278,6 +336,7 @@ class Standalone:
                       'claude-3-sonnet-20240229',
                       'claude-3-haiku-20240307',
                       'claude-2.1']
+        azureList = []
         try:
             models = [model.id.strip()
                       for model in self.client.models.list().data]
@@ -308,7 +367,12 @@ class Standalone:
                 fullOllamaList.append(model['name'])
         except:
             fullOllamaList = []
-        return gptlist, fullOllamaList, claudeList
+        try:
+            azureRawModelNames = os.environ['AZURE_OPENAI_MODEL_DEPLOYMENT_NAME']
+            azureList = azureRawModelNames.split(',')
+        except:
+            pass
+        return gptlist, fullOllamaList, claudeList, azureList
 
     def get_cli_input(self):
         """ aided by ChatGPT; uses platform library
@@ -532,7 +596,7 @@ class Setup:
         model = model.strip()
         env = os.path.expanduser("~/.config/fabric/.env")
         standalone = Standalone(args=[], pattern="")
-        gpt, ollama, claude = standalone.fetch_available_models()
+        gpt, ollama, claude, azure = standalone.fetch_available_models()
         allmodels = gpt + ollama + claude
         if model not in allmodels:
             print(
